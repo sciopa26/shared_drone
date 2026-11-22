@@ -1,4 +1,7 @@
+#launch this in another shell otherwise wont work
 #ros2 launch mavros px4.launch fcu_url:=/dev/ttyUSB0:57600 gcs_url:=udp://@127.0.0.1:145
+#reads all data filtered with EKF to remove as many outliers as possible
+#usage python3 program.py name_log.csv
 #!/usr/bin/env python3
 import argparse
 import csv

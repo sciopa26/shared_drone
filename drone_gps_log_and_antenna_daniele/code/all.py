@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#reads all data (in theory) from the flight controller without filtering with EKF
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, ReliabilityPolicy, QoSProfile

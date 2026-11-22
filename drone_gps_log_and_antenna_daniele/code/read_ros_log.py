@@ -1,3 +1,4 @@
+#colorful prints for the data logged from the flight controller
 #!/usr/bin/env python3
 import csv
 import math
