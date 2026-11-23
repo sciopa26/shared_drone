@@ -6,7 +6,7 @@ import numpy as np
 from utm import utmconv
 
 # Internal configuration parameters
-CSV_PATH = '/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/logs/filt_good.csv'
+CSV_PATH = '/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/logs/filt_out_good.csv'
 SIMPLIFICATION_METHOD = 'both'  # Options: 'rdp', 'vw', 'both'
 
 # Algorithm thresholds

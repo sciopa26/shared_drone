@@ -1,7 +1,10 @@
 # Launch MAVROS in another shell before running this script:
 # ros2 launch mavros px4.launch fcu_url:=/dev/ttyUSB0:57600 gcs_url:=udp://@127.0.0.1:14550
 # Logs both EKF-filtered and raw GNSS telemetry with per-row timestamps into two CSV files
-# Usage: python3 dual_logger.py filtered_log.csv raw_log.csv
+# Usage:
+#   python3 all_both.py filtered_log.csv raw_log.csv
+#   python3 all_both.py -live filtered_log.csv raw_log.csv
+#   python3 all_both.py -live
 #!/usr/bin/env python3
 import argparse
 import csv
@@ -10,26 +13,78 @@ import sys
 import threading
 import time
 
+import matplotlib.pyplot as plt
 import rclpy
 from rclpy.node import Node
 from rclpy.qos import qos_profile_sensor_data, ReliabilityPolicy, QoSProfile
 from diagnostic_msgs.msg import DiagnosticArray
 from mavros_msgs.msg import GPSRAW, RadioStatus, State
 from sensor_msgs.msg import NavSatFix
+from utm import utmconv
+
+
+class LiveUTMPlotter:
+    """Real-time 2D UTM trajectory plotter centered on the first valid start point."""
+
+    def __init__(self):
+        plt.ion()
+        self.fig, self.ax = plt.subplots(figsize=(8, 7))
+        self.ax.set_title('Live UTM Trajectory (Origin = Start Point)')
+        self.ax.set_xlabel('Easting [m]')
+        self.ax.set_ylabel('Northing [m]')
+        self.ax.grid(True)
+        self.ax.set_aspect('equal', adjustable='datalim')
+
+        self.ax.plot([0.0], [0.0], 'go', markersize=9, label='Start (0, 0)')
+        (self.filt_line,) = self.ax.plot([], [], '-o', color='tab:blue', markersize=4, label='Filtered (EKF)')
+        (self.raw_line,) = self.ax.plot([], [], '--x', color='tab:red', markersize=4, alpha=0.75, label='Raw GNSS')
+        (self.filt_curr,) = self.ax.plot([], [], 'bo', markersize=8)
+        (self.raw_curr,) = self.ax.plot([], [], 'rx', markersize=8)
+        self.ax.legend(loc='upper right')
+
+        self.fig.canvas.draw()
+        self.fig.canvas.flush_events()
+
+    def update(self, filt_e: list[float], filt_n: list[float], raw_e: list[float], raw_n: list[float]):
+        if not plt.fignum_exists(self.fig.number):
+            return
+
+        if filt_e:
+            self.filt_line.set_data(filt_e, filt_n)
+            self.filt_curr.set_data([filt_e[-1]], [filt_n[-1]])
+        if raw_e:
+            self.raw_line.set_data(raw_e, raw_n)
+            self.raw_curr.set_data([raw_e[-1]], [raw_n[-1]])
+
+        self.ax.relim()
+        self.ax.autoscale_view()
+        self.fig.canvas.draw_idle()
+        self.fig.canvas.flush_events()
+
+    def close(self):
+        plt.ioff()
+        if plt.fignum_exists(self.fig.number):
+            plt.close(self.fig)
 
 
 class DualTelemetryLogger(Node):
-    def __init__(self, filtered_csv_path: str, raw_csv_path: str, sample_rate_hz: float = 1.0):
+    def __init__(
+        self,
+        filtered_csv_path: str | None = None,
+        raw_csv_path: str | None = None,
+        sample_rate_hz: float = 1.0,
+        live_plot: bool = False,
+    ):
         super().__init__('dual_telemetry_logger')
 
         self.filtered_path = filtered_csv_path
         self.raw_path = raw_csv_path
 
-        self.filtered_file = open(self.filtered_path, mode='w', newline='', encoding='utf-8')
-        self.raw_file = open(self.raw_path, mode='w', newline='', encoding='utf-8')
+        self.filtered_file = open(self.filtered_path, mode='w', newline='', encoding='utf-8') if self.filtered_path else None
+        self.raw_file = open(self.raw_path, mode='w', newline='', encoding='utf-8') if self.raw_path else None
 
-        self.filtered_writer = csv.writer(self.filtered_file)
-        self.raw_writer = csv.writer(self.raw_file)
+        self.filtered_writer = csv.writer(self.filtered_file) if self.filtered_file else None
+        self.raw_writer = csv.writer(self.raw_file) if self.raw_file else None
 
         # Include both loop timestamp and ROS message header timestamp on every row
         self.header = [
@@ -43,10 +98,22 @@ class DualTelemetryLogger(Node):
             'local_rssi_dbm',
             'remote_rssi_dbm',
         ]
-        self.filtered_writer.writerow(self.header)
-        self.raw_writer.writerow(self.header)
-        self.filtered_file.flush()
-        self.raw_file.flush()
+        if self.filtered_writer:
+            self.filtered_writer.writerow(self.header)
+            self.filtered_file.flush()
+        if self.raw_writer:
+            self.raw_writer.writerow(self.header)
+            self.raw_file.flush()
+
+        # UTM conversion and live plotting state
+        self.uc = utmconv()
+        self.origin_e: float | None = None
+        self.origin_n: float | None = None
+        self.filt_e_hist: list[float] = []
+        self.filt_n_hist: list[float] = []
+        self.raw_e_hist: list[float] = []
+        self.raw_n_hist: list[float] = []
+        self.plotter = LiveUTMPlotter() if live_plot else None
 
         self.start_time = time.time()
         self.fcu_connected = False
@@ -124,6 +191,16 @@ class DualTelemetryLogger(Node):
         # Shared radio metrics
         self.local_rssi = math.nan
         self.remote_rssi = math.nan
+
+    def _to_relative_utm(self, lat: float, lon: float) -> tuple[float, float] | None:
+        """Convert geodetic coordinates to UTM meters relative to the first valid point."""
+        if math.isnan(lat) or math.isnan(lon):
+            return None
+        _, _, _, easting, northing = self.uc.geodetic_to_utm(lat, lon)
+        if self.origin_e is None or self.origin_n is None:
+            self.origin_e = easting
+            self.origin_n = northing
+        return easting - self.origin_e, northing - self.origin_n
 
     @staticmethod
     def _fmt(val: float, decimals: int = 6) -> str:
@@ -236,10 +313,24 @@ class DualTelemetryLogger(Node):
             *rssi_cols,
         ]
 
-        self.filtered_writer.writerow(filt_row)
-        self.raw_writer.writerow(raw_row)
-        self.filtered_file.flush()
-        self.raw_file.flush()
+        if self.filtered_writer and self.filtered_file:
+            self.filtered_writer.writerow(filt_row)
+            self.filtered_file.flush()
+        if self.raw_writer and self.raw_file:
+            self.raw_writer.writerow(raw_row)
+            self.raw_file.flush()
+
+        # Update live UTM trajectory if enabled
+        if self.plotter:
+            filt_utm = self._to_relative_utm(self.filt_lat, self.filt_lon)
+            raw_utm = self._to_relative_utm(self.raw_lat, self.raw_lon)
+            if filt_utm is not None:
+                self.filt_e_hist.append(filt_utm[0])
+                self.filt_n_hist.append(filt_utm[1])
+            if raw_utm is not None:
+                self.raw_e_hist.append(raw_utm[0])
+                self.raw_n_hist.append(raw_utm[1])
+            self.plotter.update(self.filt_e_hist, self.filt_n_hist, self.raw_e_hist, self.raw_n_hist)
 
         conn_tag = 'OK' if self.fcu_connected else 'NO_FCU'
         print(
@@ -252,6 +343,8 @@ class DualTelemetryLogger(Node):
         self._reset_sample_buffer()
 
     def close(self):
+        if self.plotter:
+            self.plotter.close()
         for f in (self.filtered_file, self.raw_file):
             if f and not f.closed:
                 f.flush()
@@ -270,10 +363,14 @@ def main():
     parser = argparse.ArgumentParser(
         description='Log filtered and raw MAVROS WGS84 GPS plus Radio RSSI to two CSV files.'
     )
-    parser.add_argument('filtered_csv', help='Output CSV file path for EKF-filtered data')
-    parser.add_argument('raw_csv', help='Output CSV file path for raw GNSS data')
+    parser.add_argument('-live', '--live', action='store_true', help='Show live UTM trajectory plot')
+    parser.add_argument('filtered_csv', nargs='?', help='Output CSV file path for EKF-filtered data')
+    parser.add_argument('raw_csv', nargs='?', help='Output CSV file path for raw GNSS data')
     parser.add_argument('--rate', type=float, default=1.0, help='Logging frequency in Hz')
     args = parser.parse_args()
+
+    if not args.live and (not args.filtered_csv or not args.raw_csv):
+        parser.error('filtered_csv and raw_csv are required unless -live is specified.')
 
     stop_event = threading.Event()
     input_thread = threading.Thread(target=stdin_watcher, args=(stop_event,), daemon=True)
@@ -284,6 +381,7 @@ def main():
         filtered_csv_path=args.filtered_csv,
         raw_csv_path=args.raw_csv,
         sample_rate_hz=args.rate,
+        live_plot=args.live,
     )
 
     try:

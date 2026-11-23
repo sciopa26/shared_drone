@@ -1,32 +1,43 @@
-from datetime import datetime
-from utm import utmconv
 import csv
+import math
 import matplotlib.pyplot as plt
 import numpy as np
+from utm import utmconv
 
-path = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/logs/miao.csv"
-log = csv.reader(open(path, "r"), delimiter=",")
+path = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/logs/filt_out_good.csv"
 uc = utmconv()
 
 normal_speed = 5 / 3.6  # m/s
-margin = 2
+margin = 1.5
+
 MAX_SPEED = normal_speed * margin * margin  # Effective speed threshold in m/s
 
 t, e, n = [], [], []
 
-for row in log:
-    try:
-        # Uncomment to filter by a single ROS 2 topic:
-        # if row[1] != "global_pos_raw":
-        #     continue
+with open(path, "r", newline="", encoding="utf-8") as f:
+    log = csv.reader(f, delimiter=",")
+    next(log, None)  # Skip CSV header
 
-        ts = datetime.fromisoformat(row[0]).timestamp()
-        (_, _, _, e1, n1) = uc.geodetic_to_utm(float(row[3]), float(row[4]))
-        t.append(ts)
-        e.append(e1)
-        n.append(n1)
-    except:
-        pass
+    for row in log:
+        try:
+            lat = float(row[2])
+            lon = float(row[3])
+            if math.isnan(lat) or math.isnan(lon):
+                continue
+
+            # Prefer exact ROS message stamp when available, otherwise use loop timestamp
+            ros_ts = float(row[1])
+            ts = ros_ts if not math.isnan(ros_ts) else float(row[0])
+
+            (_, _, _, e1, n1) = uc.geodetic_to_utm(lat, lon)
+            t.append(ts)
+            e.append(e1)
+            n.append(n1)
+        except (ValueError, IndexError):
+            continue
+
+if not e:
+    raise RuntimeError("No valid GNSS coordinates found in the CSV file.")
 
 t = np.array(t)
 # Center coordinates on the starting point
