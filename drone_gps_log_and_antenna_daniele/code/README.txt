@@ -2,7 +2,8 @@ These scripts form a small toolkit for a drone telemetry and positioning course 
 
 Data acquisition (ROS 2 / MAVROS)
 
-all.py is a live monitor node called TelemetryMonitor. It subscribes to the MAVROS topics for connection state, radio status (RSSI), diagnostics, fused global position and raw GPS. It prints incoming values and warns every 5 s if the FCU isn't connected or no data is arriving. It logs nothing to disk and is mainly a connectivity and debugging tool.
+all.py is a live monitor node called TelemetryMonitor. It subscribes to the MAVROS topics for connection state, radio status (RSSI), diagnostics, fused global position and raw GPS. It prints incoming values and warns every 5 s if the FCU isn't connected or no data is arriving. 
+It logs nothing to disk and is mainly a connectivity and debugging tool.
 
 all_filtered.py is the actual logger, TelemetryLogger. It samples at a fixed rate (default 1 Hz) and writes a CSV with these columns: timestamp, lat, lon, alt (WGS84), horizontal and vertical accuracy, local RSSI and remote RSSI. Details:
 
@@ -34,7 +35,8 @@ Note that the final RSSI arrays are built from log while e and n may be shorter 
 
 Simulation and work in progress
 
-fake_trajectory.py generates a synthetic "iron hysteresis loop" trajectory in east/north coordinates. Its parameters are the bounding box, loop opening width (found by bisection), rotation, saturation sharpness, number of points, and uniform arc-length resampling. It can add Gaussian noise with a separate mean and variance for each axis. It exports a CSV and plots the nominal vs noisy path. It is useful for testing filtering or outlier removal on data with a known ground truth.
+fake_trajectory.py generates a synthetic "iron hysteresis loop" trajectory in east/north coordinates. Its parameters are the bounding box, loop opening width (found by bisection), rotation, saturation sharpness, number of points, and uniform arc-length resampling. It can add Gaussian noise with a separate mean and variance for each axis. 
+It exports a CSV and plots the nominal vs noisy path. It is useful for testing filtering or outlier removal on data with a known ground truth.
 
 rm_outliers.py is an unfinished stub marked #wip. It only sets up imports, loads the file path and defines MAX_SPEED = 1.5 m/s, which suggests the plan is to reject GPS points that imply a speed above that.
 
