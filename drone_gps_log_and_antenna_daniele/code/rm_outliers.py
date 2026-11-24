@@ -8,9 +8,9 @@ path = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/l
 uc = utmconv()
 
 normal_speed = 5 / 3.6  # m/s
-margin = 1.5
+margin = 1  # 50% margin for outlier detection
 
-MAX_SPEED = normal_speed * margin * margin  # Effective speed threshold in m/s
+MAX_SPEED = normal_speed * margin  # Effective speed threshold in m/s
 
 t, e, n = [], [], []
 
@@ -76,7 +76,7 @@ plt.plot(outlier_e, outlier_n, 'rx', markersize=6, label='Outliers')
 plt.plot(e_clean, n_clean, 'b.-', markersize=3, linewidth=1.2, label='Filtered trajectory')
 plt.plot(e_clean[0], n_clean[0], 'go', markersize=8, label='Start point')
 plt.plot(e_clean[-1], n_clean[-1], 'ko', markersize=6, label='End point')
-
+plt.title('Outliers removed at {:.2f} kmph threshold'.format(MAX_SPEED*3.6))
 plt.xlabel('Easting [m]')
 plt.ylabel('Northing [m]')
 plt.legend()
