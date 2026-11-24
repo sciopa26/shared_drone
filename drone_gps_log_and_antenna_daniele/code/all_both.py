@@ -2,12 +2,14 @@
 # ros2 launch mavros px4.launch fcu_url:=/dev/ttyUSB0:57600 gcs_url:=udp://@127.0.0.1:14550
 # Logs both EKF-filtered and raw GNSS telemetry with per-row timestamps into two CSV files
 # Usage:
+#   python3 all_both.py
 #   python3 all_both.py filtered_log.csv raw_log.csv
-#   python3 all_both.py -live filtered_log.csv raw_log.csv
 #   python3 all_both.py -live
+#   python3 all_both.py -live -nocsv
 #!/usr/bin/env python3
 import argparse
 import csv
+from datetime import datetime
 import math
 import sys
 import threading
@@ -20,6 +22,7 @@ from rclpy.qos import qos_profile_sensor_data, ReliabilityPolicy, QoSProfile
 from diagnostic_msgs.msg import DiagnosticArray
 from mavros_msgs.msg import GPSRAW, RadioStatus, State
 from sensor_msgs.msg import NavSatFix
+from std_msgs.msg import Float64
 from utm import utmconv
 
 
@@ -86,7 +89,7 @@ class DualTelemetryLogger(Node):
         self.filtered_writer = csv.writer(self.filtered_file) if self.filtered_file else None
         self.raw_writer = csv.writer(self.raw_file) if self.raw_file else None
 
-        # Include both loop timestamp and ROS message header timestamp on every row
+        # Keep existing column order intact and append rel_alt_m at the end for backward compatibility
         self.header = [
             'timestamp_s',
             'ros_stamp_s',
@@ -97,6 +100,7 @@ class DualTelemetryLogger(Node):
             'v_acc_m',
             'local_rssi_dbm',
             'remote_rssi_dbm',
+            'rel_alt_m',
         ]
         if self.filtered_writer:
             self.filtered_writer.writerow(self.header)
@@ -129,6 +133,14 @@ class DualTelemetryLogger(Node):
             NavSatFix,
             '/mavros/global_position/global',
             self.on_global_pos_msg,
+            qos_profile_sensor_data,
+        )
+
+        # Relative altitude above home/EKF origin
+        self.sub_rel_alt = self.create_subscription(
+            Float64,
+            '/mavros/global_position/rel_alt',
+            self.on_rel_alt_msg,
             qos_profile_sensor_data,
         )
 
@@ -165,10 +177,13 @@ class DualTelemetryLogger(Node):
         )
 
         self.timer = self.create_timer(1.0 / sample_rate_hz, self.log_sample)
-        self.get_logger().info(
-            f"Logging filtered -> '{self.filtered_path}' and raw -> '{self.raw_path}'. "
-            "Type 'save' and press Enter to stop."
-        )
+        if self.filtered_path and self.raw_path:
+            self.get_logger().info(
+                f"Logging filtered -> '{self.filtered_path}' and raw -> '{self.raw_path}'. "
+                "Type 'save' and press Enter to stop."
+            )
+        else:
+            self.get_logger().info("Running without CSV logging (-nocsv). Type 'save' and press Enter to stop.")
 
     def _reset_sample_buffer(self):
         """Reset current cycle values to NaN so missing readings never shift columns."""
@@ -188,9 +203,10 @@ class DualTelemetryLogger(Node):
         self.raw_h_acc = math.nan
         self.raw_v_acc = math.nan
 
-        # Shared radio metrics
+        # Shared metrics
         self.local_rssi = math.nan
         self.remote_rssi = math.nan
+        self.rel_alt = math.nan
 
     def _to_relative_utm(self, lat: float, lon: float) -> tuple[float, float] | None:
         """Convert geodetic coordinates to UTM meters relative to the first valid point."""
@@ -235,6 +251,9 @@ class DualTelemetryLogger(Node):
             self.filt_lon = msg.longitude
             self.filt_alt = msg.altitude
             self.filt_h_acc, self.filt_v_acc = self._extract_cov_accuracy(msg)
+
+    def on_rel_alt_msg(self, msg: Float64):
+        self.rel_alt = float(msg.data)
 
     def on_global_pos_raw_msg(self, msg: NavSatFix):
         if msg.status.status >= 0:
@@ -290,6 +309,7 @@ class DualTelemetryLogger(Node):
     def log_sample(self):
         elapsed = f'{time.time() - self.start_time:.2f}'
         rssi_cols = [self._fmt(self.local_rssi, 1), self._fmt(self.remote_rssi, 1)]
+        rel_alt_col = self._fmt(self.rel_alt, 3)
 
         filt_row = [
             elapsed,
@@ -300,6 +320,7 @@ class DualTelemetryLogger(Node):
             self._fmt(self.filt_h_acc, 3),
             self._fmt(self.filt_v_acc, 3),
             *rssi_cols,
+            rel_alt_col,
         ]
 
         raw_row = [
@@ -311,6 +332,7 @@ class DualTelemetryLogger(Node):
             self._fmt(self.raw_h_acc, 3),
             self._fmt(self.raw_v_acc, 3),
             *rssi_cols,
+            rel_alt_col,
         ]
 
         if self.filtered_writer and self.filtered_file:
@@ -337,6 +359,7 @@ class DualTelemetryLogger(Node):
             f'[{conn_tag}] t={elapsed}s | '
             f'FILT: ({filt_row[2]}, {filt_row[3]}, {filt_row[4]}m) | '
             f'RAW: ({raw_row[2]}, {raw_row[3]}, {raw_row[4]}m) | '
+            f'RelAlt: {rel_alt_col}m | '
             f'RSSI(L/R): {rssi_cols[0]}/{rssi_cols[1]} dBm'
         )
 
@@ -364,13 +387,24 @@ def main():
         description='Log filtered and raw MAVROS WGS84 GPS plus Radio RSSI to two CSV files.'
     )
     parser.add_argument('-live', '--live', action='store_true', help='Show live UTM trajectory plot')
+    parser.add_argument('-nocsv', '--nocsv', action='store_true', help='Disable CSV file creation')
     parser.add_argument('filtered_csv', nargs='?', help='Output CSV file path for EKF-filtered data')
     parser.add_argument('raw_csv', nargs='?', help='Output CSV file path for raw GNSS data')
     parser.add_argument('--rate', type=float, default=1.0, help='Logging frequency in Hz')
     args = parser.parse_args()
 
-    if not args.live and (not args.filtered_csv or not args.raw_csv):
-        parser.error('filtered_csv and raw_csv are required unless -live is specified.')
+    if args.nocsv:
+        filtered_csv = None
+        raw_csv = None
+    elif args.filtered_csv and args.raw_csv:
+        filtered_csv = args.filtered_csv
+        raw_csv = args.raw_csv
+    elif not args.filtered_csv and not args.raw_csv:
+        run_ts = datetime.now().strftime('%Y-%m-%d_%H-%M-%S')
+        filtered_csv = f'filt_{run_ts}.csv'
+        raw_csv = f'unfilt_{run_ts}.csv'
+    else:
+        parser.error('Provide both filtered_csv and raw_csv, or omit both to auto-generate filenames.')
 
     stop_event = threading.Event()
     input_thread = threading.Thread(target=stdin_watcher, args=(stop_event,), daemon=True)
@@ -378,8 +412,8 @@ def main():
 
     rclpy.init()
     node = DualTelemetryLogger(
-        filtered_csv_path=args.filtered_csv,
-        raw_csv_path=args.raw_csv,
+        filtered_csv_path=filtered_csv,
+        raw_csv_path=raw_csv,
         sample_rate_hz=args.rate,
         live_plot=args.live,
     )
@@ -390,7 +424,10 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        print(f"\nSaving and closing '{args.filtered_csv}' and '{args.raw_csv}'...")
+        if filtered_csv and raw_csv:
+            print(f"\nSaving and closing '{filtered_csv}' and '{raw_csv}'...")
+        else:
+            print('\nClosing node (no CSV files written)...')
         node.close()
         node.destroy_node()
         if rclpy.ok():
