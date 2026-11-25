@@ -1,0 +1,4 @@
+timestamp_s,ros_stamp_s,lat_wgs84_deg,lon_wgs84_deg,alt_wgs84_m,h_acc_m,v_acc_m,local_rssi_dbm,remote_rssi_dbm,rel_alt_m
+1.03,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+2.03,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN
+3.03,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN,NaN

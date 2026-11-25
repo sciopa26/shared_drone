@@ -7,11 +7,11 @@ import numpy as np
 from utm import utmconv
 
 # Internal path configuration
-CSV_PATH = r"C:\\Users\\aless\\shared_drone\\drone_gps_log_and_antenna_daniele\\logs\\filt_bad.csv"
+CSV_PATH = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/code/filt_2026-11-25_17-58-00.csv"
 
 
 def read_telemetry_csv(file_path: str) -> list[dict]:
-    """Load lat, lon, alt, and RSSI values from the CSV into a Python list."""
+    """Load timestamp, lat, lon, alt, relative alt, and RSSI values from the CSV."""
     records = []
 
     with open(file_path, mode='r', newline='', encoding='utf-8') as f:
@@ -19,14 +19,61 @@ def read_telemetry_csv(file_path: str) -> list[dict]:
         for row in reader:
             # float('NaN') natively converts 'NaN' strings into IEEE 754 float NaNs
             records.append({
+                'timestamp': float(row['timestamp_s']),
                 'lat': float(row['lat_wgs84_deg']),
                 'lon': float(row['lon_wgs84_deg']),
                 'alt': float(row['alt_wgs84_m']),
+                'rel_alt': float(row.get('rel_alt_m', 'NaN')),
                 'local_rssi': float(row['local_rssi_dbm']),
                 'remote_rssi': float(row['remote_rssi_dbm']),
             })
 
     return records
+
+
+def plot_altitude_over_time(telemetry_data: list[dict]):
+    """Plot WGS84 altitude and (initial altitude + relative altitude) over time."""
+    if not telemetry_data:
+        print("No telemetry data to plot.")
+        return
+
+    t = np.array([d['timestamp'] for d in telemetry_data])
+    alt = np.array([d['alt'] for d in telemetry_data])
+    rel_alt = np.array([d['rel_alt'] for d in telemetry_data])
+
+    # Use the first valid altitude sample as the t=0 reference
+    valid_alt = alt[~np.isnan(alt)]
+    if len(valid_alt) == 0:
+        print("No valid altitude samples to plot.")
+        return
+
+    alt_0 = valid_alt[0]
+    reconstructed_alt = alt_0 + rel_alt
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(13, 5))
+
+    # 1. Direct WGS84 altitude over time
+    ax1.plot(t, alt, '-o', color='tab:blue', markersize=3, label='WGS84 Altitude')
+    ax1.set_title('Altitude over Time (WGS84)')
+    ax1.set_xlabel('Time [s]')
+    ax1.set_ylabel('Altitude [m]')
+    ax1.legend()
+    ax1.grid(True)
+
+    # 2. Initial altitude + relative altitude over time
+    ax2.plot(
+        t, reconstructed_alt, '-s', color='tab:orange', markersize=3,
+        label=f'Alt(t=0) [{alt_0:.2f}m] + Rel Alt'
+    )
+    ax2.set_title('Initial Altitude + Relative Altitude over Time')
+    ax2.set_xlabel('Time [s]')
+    ax2.set_ylabel('Altitude [m]')
+    ax2.legend()
+    ax2.grid(True)
+
+    plt.tight_layout()
+    plt.show()
+
 
 def plot_trajectory_with_rssi(telemetry_data: list[dict]):
     """Plot the trajectory in UTM coordinates with RSSI values."""
@@ -93,6 +140,7 @@ def plot_trajectory_with_rssi(telemetry_data: list[dict]):
     plt.tight_layout()
     plt.show()
 
+
 def plot_trajectory_2d(telemetry_data: list[dict]):
     """Plot the 2D trajectory in UTM coordinates."""
     if not telemetry_data:
@@ -122,6 +170,7 @@ def plot_trajectory_2d(telemetry_data: list[dict]):
     plt.legend()
     plt.grid()
     plt.show()
+
 
 def plot_trajectory_3d(telemetry_data: list[dict]):
     """Plot the 3D trajectory in UTM coordinates with altitude."""
@@ -158,6 +207,7 @@ def plot_trajectory_3d(telemetry_data: list[dict]):
     plt.title('3D Trajectory in UTM Coordinates with Altitude')
     plt.show()
 
+
 if __name__ == '__main__':
     telemetry_data = read_telemetry_csv(CSV_PATH)
     print(f"Loaded {len(telemetry_data)} samples.")
@@ -167,3 +217,4 @@ if __name__ == '__main__':
     plot_trajectory_2d(telemetry_data)
     plot_trajectory_3d(telemetry_data)
     plot_trajectory_with_rssi(telemetry_data)
+    plot_altitude_over_time(telemetry_data)
