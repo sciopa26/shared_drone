@@ -4,7 +4,8 @@ from utm import utmconv
 import csv
 import matplotlib.pyplot as plt
 import numpy as np
-path = "/home/daniele/Documents/introduction_to_drone_technology/Module 7 - UAS positioning and navigation/miao.csv"
+import pathlib
+path = r"C:\\Users\\aless\\shared_drone\\drone_gps_log_and_antenna_daniele\\logs\\filt_good.csv"
 log = csv.reader(open(path, "r"), delimiter=",")
 uc = utmconv()
 

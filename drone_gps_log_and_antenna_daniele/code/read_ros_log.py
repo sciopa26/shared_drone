@@ -7,7 +7,7 @@ import numpy as np
 from utm import utmconv
 
 # Internal path configuration
-CSV_PATH = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/code/unfilt_alt_test.csv"
+CSV_PATH = r"C:\\Users\\aless\\shared_drone\\drone_gps_log_and_antenna_daniele\\logs\\filt_bad.csv"
 
 
 def read_telemetry_csv(file_path: str) -> list[dict]:
