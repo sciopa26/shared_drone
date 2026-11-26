@@ -7,8 +7,8 @@ import numpy as np
 from utm import utmconv
 
 # Internal path configuration
-CSV_PATH = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/logs/unfilt_good.csv"
-
+CSV_PATH_good = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/code/filt_good_run.csv"
+CSV_PATH_bad = "/home/daniele/Documents/shared_drone/drone_gps_log_and_antenna_daniele/code/filt_bad_run.csv"
 
 def read_telemetry_csv(file_path: str) -> list[dict]:
     """Load timestamp, lat, lon, alt, relative alt, and RSSI values from the CSV."""
@@ -276,7 +276,7 @@ def rssi_vs_distance(telemetry_data: list[dict], plot = False):
     return bin_centers, local_rssi_binned, remote_rssi_binned
 
 if __name__ == '__main__':
-    telemetry_data = read_telemetry_csv(CSV_PATH)
+    telemetry_data = read_telemetry_csv(CSV_PATH_good)
     print(f"Loaded {len(telemetry_data)} samples.")
     if telemetry_data:
         print("Sample 0:", telemetry_data[0])
@@ -286,3 +286,27 @@ if __name__ == '__main__':
     trajectory_with_rssi(telemetry_data, plot=True)
     altitude_over_time(telemetry_data, plot=True)
     rssi_vs_distance(telemetry_data, plot=True)
+
+    telemetry_data_good = read_telemetry_csv(CSV_PATH_good)
+    telemetry_data_bad = read_telemetry_csv(CSV_PATH_bad)
+
+    [bin_centers_good, local_rssi_binned_good, remote_rssi_binned_good] = rssi_vs_distance(telemetry_data_good)
+    [bin_centers_bad, local_rssi_binned_bad, remote_rssi_binned_bad] = rssi_vs_distance(telemetry_data_bad)
+    #normalization of the RSSI values to compare the two runs on the same first and last distance bins
+    min_distance = 10
+    max_distance = 390
+    min_idx_good = np.searchsorted(bin_centers_good, min_distance)
+    max_idx_good = np.searchsorted(bin_centers_good, max_distance)
+    min_idx_bad = np.searchsorted(bin_centers_bad, min_distance)
+    max_idx_bad = np.searchsorted(bin_centers_bad, max_distance)
+    local_rssi_binned_good = local_rssi_binned_good[min_idx_good:max_idx_good]
+    local_rssi_binned_bad = local_rssi_binned_bad[min_idx_bad:max_idx_bad]
+    plt.plot(bin_centers_good[min_idx_good:max_idx_good], local_rssi_binned_good, '-o', markersize=3, label='Local RSSI (GCS) - Good Run')
+    plt.plot(bin_centers_bad[min_idx_bad:max_idx_bad], local_rssi_binned_bad, '-s', markersize=3, label='Local RSSI (GCS) - Bad Run')
+    plt.title('RSSI vs Distance from Start Point (Good vs Bad Run)')
+    plt.xlabel('Distance [m]')
+    plt.ylabel('RSSI [dBm]')
+    plt.legend()
+    plt.grid(True)
+    plt.show()
+    
